@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import argparse
+import configparser
 import gzip
 import json
 import os
 import re
 import statistics
-import sys
 from datetime import datetime
 from string import Template
 
@@ -17,10 +18,10 @@ from string import Template
 config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
-    "LOG_DIR": "./log",
+    "LOG_DIR": "/home/makarovaiv/Downloads/logs",
 }
 
-FILE_PATH = r'/home/makarovaiv/Downloads/logs'
+DEFAULT_CONFIG_PATH = './test_config.ini'
 
 # nginx-access-ui.log-20170630.gz
 FILE_PATTERN = r'^nginx-access-ui\.log-(\d{8})(\.gz)?'
@@ -34,6 +35,29 @@ URL_PATTERN = r'^(?P<method>.+) (?P<url>.+) (?P<protocol>.+)$'
 TEMPLATE_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "report.html")
 )
+
+
+def get_config():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--config', help='Config file path')
+    args = arg_parser.parse_args()
+
+    config_file_path = args.config if args.config else DEFAULT_CONFIG_PATH
+    cfg_parser = configparser.ConfigParser()
+    cfg_parser.optionxform = str
+    cfg_parser.read_file(open(config_file_path, "r"))
+
+    return dict(cfg_parser.items("DEFAULT"))
+
+
+def merge_configs(default_config, config_from_file):
+    if not config_from_file:
+        return default_config
+
+    cfg = {}
+    for param in default_config:
+        cfg[param] = config_from_file[param] if (param in config_from_file) else default_config[param]
+    return cfg
 
 
 def find_latest_file(file_pattern, file_path):
@@ -54,7 +78,7 @@ def open_file(name, path, extension):
     if name:
         full_name = path + '/' + name
         if extension == "gz":
-            return gzip.open(filename=full_name, encoding='utf-8')
+            return gzip.open(filename=full_name, encoding="utf-8")
         else:
             return open(full_name)
 
@@ -79,7 +103,7 @@ def parse_logs(lines):
             yield None
 
 
-def collect_data_for_table(lines):
+def collect_data_for_table(lines, report_size):
     result_table = {}
     total_request_count = 0
     total_request_time = 0
@@ -113,7 +137,8 @@ def collect_data_for_table(lines):
                               "time_med": statistics.median(request_time_array)
                               })
 
-    return template_data
+    sorted_data = sorted(template_data, key=lambda t: t["time_sum"], reverse=True)
+    return sorted_data[:int(report_size)]
 
 
 def render_html(data):
@@ -125,16 +150,15 @@ def render_html(data):
     )
 
 
-def save_to_file(content, name):
-    path = os.path.abspath(config["REPORT_DIR"])
+def save_to_file(content, name, path):
+    path = os.path.abspath(path)
     if not os.path.exists(path):
         os.makedirs(path, mode=0o777)
 
     file_path = os.path.join(path, name)
 
-    f = open(file_path, "w")
-    f.write(content)
-    f.close()
+    with open(file_path, "w") as f:
+        f.write(content)
 
 
 def get_file_name_from_meta(file_meta):
@@ -142,18 +166,23 @@ def get_file_name_from_meta(file_meta):
     return "report-" + date.strftime('%Y.%m.%d') + ".html"
 
 
-def check_file_report_exists(file_report_name):
-    file_name = get_file_name_from_meta(file_report_name)
+def check_file_report_exists(file_meta, path):
+    file_name = get_file_name_from_meta(file_meta)
     file_path = os.path.abspath(
-        os.path.join(config["REPORT_DIR"], file_name)
+        os.path.join(path, file_name)
     )
 
     return os.path.exists(file_path)
 
 
 def main():
-    file_meta = find_latest_file(FILE_PATTERN, FILE_PATH)
-    if not check_file_report_exists(file_meta):
+    config_from_file = get_config()
+    effective_config = merge_configs(config, config_from_file)
+    file_meta = find_latest_file(FILE_PATTERN, effective_config["LOG_DIR"])
+    if file_meta["name"] is None:
+        return
+
+    if not check_file_report_exists(file_meta, effective_config["REPORT_DIR"]):
         logfile = open_file(name=file_meta["name"], path=file_meta["path"], extension=file_meta["extension"])
         if not logfile:
             return
@@ -163,12 +192,12 @@ def main():
             return
 
         parsed_data = parse_logs(log_lines)
-        data_for_table = collect_data_for_table(parsed_data)
+        data_for_table = collect_data_for_table(parsed_data, effective_config["REPORT_SIZE"])
         report_content = render_html(data_for_table)
         if not report_content:
             return
 
-        save_to_file(report_content, get_file_name_from_meta(file_meta))
+        save_to_file(report_content, get_file_name_from_meta(file_meta), effective_config["REPORT_DIR"])
 
 
 if __name__ == "__main__":
