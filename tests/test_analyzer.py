@@ -1,24 +1,22 @@
 import unittest
 from test_merge_configs import MergeConfigsTest
 from test_find_latest_file import FindLatestFileTests
+from test_parse_data import ParseDataTests
+from test_collect_data import CollectDataTests
+from test_generate_report import GenerateReportTest
+
+
+def suite():
+    test_suite = unittest.TestSuite()
+    test_suite.addTest(unittest.makeSuite(MergeConfigsTest))
+    test_suite.addTest(unittest.makeSuite(FindLatestFileTests))
+    test_suite.addTest(unittest.makeSuite(ParseDataTests))
+    test_suite.addTest(unittest.makeSuite(CollectDataTests))
+    test_suite.addTest(unittest.makeSuite(GenerateReportTest))
+    return test_suite
 
 
 if __name__ == '__main__':
+    mySuite = suite()
     runner = unittest.TextTestRunner()
-    runner.run(MergeConfigsTest)
-    runner.run(FindLatestFileTests)
-
-
-class ParseDataTests(unittest.TestCase):
-    def test_parse_logs(self):
-        pass
-
-
-class CollectDataTests(unittest.TestCase):
-    def test_collect_data_from_table(self):
-        pass
-
-
-class GenerateReportTest(unittest.TestCase):
-    def test_generate_html_report(self):
-        pass
+    runner.run(mySuite)
