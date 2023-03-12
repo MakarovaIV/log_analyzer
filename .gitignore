@@ -130,4 +130,4 @@ dmypy.json
 
 .idea
 /reports/
-/tests/reports/
+/test_reports/
