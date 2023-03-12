@@ -7,6 +7,8 @@ import json
 import os
 import re
 import statistics
+import logging
+import sys
 from datetime import datetime
 from string import Template
 
@@ -16,9 +18,11 @@ from string import Template
 #                     '$request_time';
 
 config = {
-    "REPORT_SIZE": 1000,
+    "REPORT_SIZE": 10,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "/home/makarovaiv/Downloads/logs",
+    "LOG_FILE": "./monitoring.log",
+    "MAX_ERROR_PERC": 10,  # in %
 }
 
 DEFAULT_CONFIG_PATH = './test_config.ini'
@@ -38,72 +42,135 @@ TEMPLATE_PATH = os.path.abspath(
 
 
 def get_config():
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument('--config', help='Config file path')
-    args = arg_parser.parse_args()
+    try:
+        arg_parser = argparse.ArgumentParser()
+        arg_parser.add_argument('--config', help='Config file path')
+        args = arg_parser.parse_args()
 
-    config_file_path = args.config if args.config else DEFAULT_CONFIG_PATH
-    cfg_parser = configparser.ConfigParser()
-    cfg_parser.optionxform = str
-    cfg_parser.read_file(open(config_file_path, "r"))
+        config_file_path = args.config if args.config else DEFAULT_CONFIG_PATH
+        cfg_parser = configparser.ConfigParser()
+        cfg_parser.optionxform = str
+        cfg_parser.read_file(open(config_file_path, "r"))
 
-    return dict(cfg_parser.items("DEFAULT"))
+        return dict(cfg_parser.items("DEFAULT"))
+
+    except Exception:
+        logging.exception('Error in trying get config')
 
 
 def merge_configs(default_config, config_from_file):
-    if not config_from_file:
-        return default_config
+    try:
+        if not config_from_file:
+            return default_config
 
-    cfg = {}
-    for param in default_config:
-        cfg[param] = config_from_file[param] if (param in config_from_file) else default_config[param]
-    return cfg
+        cfg = {}
+        for param in default_config:
+            cfg[param] = config_from_file[param] if (param in config_from_file) else default_config[param]
+        return cfg
+
+    except Exception:
+        logging.exception('Error in trying merge default and external configs')
+
+
+def logging_set_up(log_file_name):
+    if log_file_name is None or "":
+        log_name = None
+    else:
+        log_name = log_file_name
+
+    logging.basicConfig(filename=log_name,
+                        filemode="w",
+                        format='[%(asctime)s] %(levelname)s %(message)s',
+                        datefmt='%Y.%m.%d%H:%M:%S',
+                        level=logging.INFO)
 
 
 def find_latest_file(file_pattern, file_path):
-    latest_file, latest_create_time, path, file_extension = None, None, None, None
-    regex = re.compile(file_pattern)
-    for path, dirs, files in os.walk(file_path):
-        filtered_files = filter(lambda file: regex.match(file), files)
-        for name in filtered_files:
-            file_time = regex.match(name).group(1)
-            if not latest_create_time or file_time > latest_create_time:
-                latest_create_time = file_time
-                latest_file = name
-                file_extension = regex.match(name).group(2)
-    return {"name": latest_file, "time": latest_create_time, "path": path, "extension": file_extension}
+    try:
+        latest_file_name, latest_create_time, path, file_extension = None, None, None, None
+        regex = re.compile(file_pattern)
+
+        for path, dirs, files in os.walk(file_path):
+            filtered_files = filter(lambda file: regex.match(file), files)
+            for name in filtered_files:
+                file_time = regex.match(name).group(1)
+
+                if not latest_create_time or file_time > latest_create_time:
+                    latest_create_time = file_time
+                    latest_file_name = name
+                    file_extension = regex.match(name).group(2)
+
+        logging.info("The latest log file is %s/%s", path, latest_file_name)
+        return {"name": latest_file_name, "time": latest_create_time, "path": path, "extension": file_extension}
+
+    except Exception:
+        logging.exception('Error in trying find latest log file')
 
 
 def open_file(name, path, extension):
+    file = None
     if name:
         full_name = path + '/' + name
-        if extension == "gz":
-            return gzip.open(filename=full_name, encoding="utf-8")
-        else:
-            return open(full_name)
+        logging.info("File %s is opening", name)
+
+        try:
+            if extension == ".gz":
+                file = gzip.open(filename=full_name, mode="rt")
+            else:
+                file = open(full_name)
+
+        except Exception:
+            logging.exception('Cannot open file')
+
+    return file
 
 
 def read_lines_from_file(sources):
     for row in sources:
         yield row
+    sources.close()
 
 
-def parse_logs(lines):
+def parse_logs(lines, max_error_perc):
     regex_row = re.compile(ROW_PATTERN)
     regex_url = re.compile(URL_PATTERN)
 
+    total_count = 0
+    error_count = 0
     for line in lines:
-        matches = regex_row.match(line)
+        matches = None
+        total_count += 1
+
+        try:
+            matches = regex_row.match(line)
+        except Exception:
+            logging.exception('Cannot parse "%s"', line)
+
         if matches:
             request = matches.groupdict()['request']
             request_time = matches.groupdict()['request_time']
-            url_string = regex_url.match(request).groupdict()['url']
+
+            try:
+                url_string = regex_url.match(request).groupdict()['url']
+            except Exception:
+                logging.exception('Cannot parse url in request "%s"', request)
+
             yield {"url": url_string, "request_time": request_time}
         else:
+            error_count += 1
+            error_perc = (error_count / total_count) * 100
+
+            if error_perc >= max_error_perc:
+                logging.error(f'Error count > {max_error_perc}%')
+                sys.exit(1)
+
             yield None
 
 
 def collect_data_for_table(lines, report_size):
+    if not lines:
+        return []
+
     result_table = {}
     total_request_count = 0
     total_request_time = 0
@@ -120,7 +187,6 @@ def collect_data_for_table(lines, report_size):
                 result_table[url] = [request_time]
         else:
             pass
-            # print("-------------------")
 
     template_data = []
     for url in result_table:
@@ -138,16 +204,21 @@ def collect_data_for_table(lines, report_size):
                               })
 
     sorted_data = sorted(template_data, key=lambda t: t["time_sum"], reverse=True)
+    logging.info("Data for report is analyzed")
+
     return sorted_data[:int(report_size)]
 
 
 def render_html(data):
-    with open(TEMPLATE_PATH, "rb") as f:
-        template = Template(f.read().decode("utf-8"))
+    try:
+        with open(TEMPLATE_PATH, "rb") as f:
+            template = Template(f.read().decode("utf-8"))
 
-    return template.safe_substitute(
-        {"table_json": json.dumps(data)}
-    )
+        return template.safe_substitute(
+            {"table_json": json.dumps(data)}
+        )
+    except Exception:
+        logging.exception("HTML rendering failed")
 
 
 def save_to_file(content, name, path):
@@ -159,6 +230,7 @@ def save_to_file(content, name, path):
 
     with open(file_path, "w") as f:
         f.write(content)
+    logging.info("Report file is saved %s", file_path)
 
 
 def get_file_name_from_meta(file_meta):
@@ -175,30 +247,44 @@ def check_file_report_exists(file_meta, path):
     return os.path.exists(file_path)
 
 
-def main():
-    config_from_file = get_config()
-    effective_config = merge_configs(config, config_from_file)
+def main(effective_config):
     file_meta = find_latest_file(FILE_PATTERN, effective_config["LOG_DIR"])
-    if file_meta["name"] is None:
+    if not file_meta["name"]:
         return
 
-    if not check_file_report_exists(file_meta, effective_config["REPORT_DIR"]):
-        logfile = open_file(name=file_meta["name"], path=file_meta["path"], extension=file_meta["extension"])
-        if not logfile:
-            return
+    if check_file_report_exists(file_meta, effective_config["REPORT_DIR"]):
+        logging.info("File report is existed %s", file_meta["name"])
+        return
 
-        log_lines = read_lines_from_file(logfile)
-        if not log_lines:
-            return
+    logfile = open_file(name=file_meta["name"], path=file_meta["path"], extension=file_meta["extension"])
+    if not logfile:
+        return
 
-        parsed_data = parse_logs(log_lines)
-        data_for_table = collect_data_for_table(parsed_data, effective_config["REPORT_SIZE"])
-        report_content = render_html(data_for_table)
-        if not report_content:
-            return
+    log_lines = read_lines_from_file(logfile)
+    if not log_lines:
+        return
 
-        save_to_file(report_content, get_file_name_from_meta(file_meta), effective_config["REPORT_DIR"])
+    parsed_data = parse_logs(log_lines, effective_config["MAX_ERROR_PERC"])
+    if not parsed_data:
+        return
+
+    data_for_table = collect_data_for_table(parsed_data, effective_config["REPORT_SIZE"])
+    report_content = render_html(data_for_table)
+    if not report_content:
+        return
+
+    save_to_file(report_content, get_file_name_from_meta(file_meta), effective_config["REPORT_DIR"])
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        config_from_file = get_config()
+        effective_config = merge_configs(config, config_from_file)
+        logging_set_up(effective_config["LOG_FILE"])
+        main(effective_config)
+
+    except Exception:
+        logging.exception("Unexpected error")
+    except KeyboardInterrupt:
+        logging.exception("Interrupted by user")
+
