@@ -20,7 +20,7 @@ from string import Template
 config = {
     "REPORT_SIZE": 10,
     "REPORT_DIR": "./reports",
-    "LOG_DIR": "/home/makarovaiv/Downloads/logs",
+    "LOG_DIR": "./test_data/find_gz",
     "LOG_FILE": "./monitoring.log",
     "MAX_ERROR_PERC": 10,  # in %
 }
@@ -28,7 +28,7 @@ config = {
 DEFAULT_CONFIG_PATH = './test_config.ini'
 
 # nginx-access-ui.log-20170630.gz
-FILE_PATTERN = r'^nginx-access-ui\.log-(\d{8})(\.gz)?'
+FILE_PATTERN = r'^nginx-access-ui\.log-(\d{8})(\.gz)?$'
 
 # 1.196.116.32 -  - [29/Jun/2017:03:50:22 +0300] "GET /api/v2/banner/25019354 HTTP/1.1" 200 927 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498697422-2190034393-4708-9752759" "dc7161be3" 0.390
 ROW_PATTERN = r'^(.+) (.+) (.+) \[(.+)\] \"(?P<request>.+)\" 200 (.+) \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" (?P<request_time>.+)$'
@@ -90,7 +90,9 @@ def find_latest_file(file_pattern, file_path):
         latest_file_name, latest_create_time, path, file_extension = None, None, None, None
         regex = re.compile(file_pattern)
 
-        for path, dirs, files in os.walk(file_path):
+        aaa = file_path if os.path.isabs(file_path) else os.path.abspath(file_path)
+
+        for path, dirs, files in os.walk(aaa):
             filtered_files = filter(lambda file: regex.match(file), files)
             for name in filtered_files:
                 file_time = regex.match(name).group(1)
@@ -264,7 +266,7 @@ def main(effective_config):
     if not log_lines:
         return
 
-    parsed_data = parse_logs(log_lines, effective_config["MAX_ERROR_PERC"])
+    parsed_data = parse_logs(log_lines, float(effective_config["MAX_ERROR_PERC"]))
     if not parsed_data:
         return
 
