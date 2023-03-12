@@ -14,4 +14,6 @@ git clone git@github.com:MakarovaIV/log_analyzer.git
 python3 log_analyzer.py
 ```
 ## Run tests
-TBD
+```commandline
+python3 -m unittest test_analyzer.py -v
+```
