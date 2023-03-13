@@ -21,5 +21,5 @@ jobs:
         flake8 log_analyzer.py
     - name: Run Tests with coverage
       run: |
-        python3 -m coverage run -m unittest test_analyzer.py
+        python3 -m coverage run -m unittest test_analyzer.py -v
         python3 -m coverage report
