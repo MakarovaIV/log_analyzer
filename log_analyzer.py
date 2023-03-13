@@ -12,9 +12,11 @@ import sys
 from datetime import datetime
 from string import Template
 
-# log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
+# log_format ui_short '$remote_addr  $remote_user $http_x_real_ip
+#                      [$time_local] "$request" '
 #                     '$status $body_bytes_sent "$http_referer" '
-#                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
+#                     '"$http_user_agent" "$http_x_forwarded_for"
+#                     "$http_X_REQUEST_ID" "$http_X_RB_USER" '
 #                     '$request_time';
 
 config = {
@@ -30,8 +32,13 @@ DEFAULT_CONFIG_PATH = './test_config.ini'
 # nginx-access-ui.log-20170630.gz
 FILE_PATTERN = r'^nginx-access-ui\.log-(\d{8})(\.gz)?$'
 
-# 1.196.116.32 -  - [29/Jun/2017:03:50:22 +0300] "GET /api/v2/banner/25019354 HTTP/1.1" 200 927 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498697422-2190034393-4708-9752759" "dc7161be3" 0.390
-ROW_PATTERN = r'^(.+) (.+) (.+) \[(.+)\] \"(?P<request>.+)\" 200 (.+) \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" (?P<request_time>.+)$'
+# 1.196.116.32 -  - [29/Jun/2017:03:50:22 +0300]
+# "GET /api/v2/banner/25019354 HTTP/1.1" 200 927
+# "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5"
+# "-" "1498697422-2190034393-4708-9752759" "dc7161be3" 0.390
+ROW_PATTERN = r'^(.+) (.+) (.+) \[(.+)\] \"(?P<request>.+)\" 200 ' \
+              r'(.+) \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" \"(.+)\" ' \
+              r'(?P<request_time>.+)$'
 
 # GET /api/v2/banner/25019354 HTTP/1.1
 URL_PATTERN = r'^(?P<method>.+) (?P<url>.+) (?P<protocol>.+)$'
@@ -65,7 +72,9 @@ def merge_configs(default_config, config_from_file):
 
         cfg = {}
         for param in default_config:
-            cfg[param] = config_from_file[param] if (param in config_from_file) else default_config[param]
+            cfg[param] = config_from_file[param] \
+                if (param in config_from_file) \
+                else default_config[param]
         return cfg
 
     except Exception:
@@ -87,10 +96,12 @@ def logging_set_up(log_file_name):
 
 def find_latest_file(file_pattern, file_path):
     try:
-        latest_file_name, latest_create_time, path, file_extension = None, None, None, None
+        latest_file_name, latest_create_time, \
+            path, file_extension = None, None, None, None
         regex = re.compile(file_pattern)
 
-        aaa = file_path if os.path.isabs(file_path) else os.path.abspath(file_path)
+        aaa = file_path if os.path.isabs(file_path) \
+            else os.path.abspath(file_path)
 
         for path, dirs, files in os.walk(aaa):
             filtered_files = filter(lambda file: regex.match(file), files)
@@ -102,8 +113,13 @@ def find_latest_file(file_pattern, file_path):
                     latest_file_name = name
                     file_extension = regex.match(name).group(2)
 
-        logging.info("The latest log file is %s/%s", path, latest_file_name)
-        return {"name": latest_file_name, "time": latest_create_time, "path": path, "extension": file_extension}
+        logging.info("The latest log file is %s/%s",
+                     path,
+                     latest_file_name)
+        return {"name": latest_file_name,
+                "time": latest_create_time,
+                "path": path,
+                "extension": file_extension}
 
     except Exception:
         logging.exception('Error in trying find latest log file')
@@ -205,7 +221,9 @@ def collect_data_for_table(lines, report_size):
                               "time_med": statistics.median(request_time_array)
                               })
 
-    sorted_data = sorted(template_data, key=lambda t: t["time_sum"], reverse=True)
+    sorted_data = sorted(template_data,
+                         key=lambda t: t["time_sum"],
+                         reverse=True)
     logging.info("Data for report is analyzed")
 
     return sorted_data[:int(report_size)]
@@ -250,15 +268,19 @@ def check_file_report_exists(file_meta, path):
 
 
 def main(effective_config):
-    file_meta = find_latest_file(FILE_PATTERN, effective_config["LOG_DIR"])
+    file_meta = find_latest_file(FILE_PATTERN,
+                                 effective_config["LOG_DIR"])
     if not file_meta["name"]:
         return
 
-    if check_file_report_exists(file_meta, effective_config["REPORT_DIR"]):
+    if check_file_report_exists(file_meta,
+                                effective_config["REPORT_DIR"]):
         logging.info("File report is existed %s", file_meta["name"])
         return
 
-    logfile = open_file(name=file_meta["name"], path=file_meta["path"], extension=file_meta["extension"])
+    logfile = open_file(name=file_meta["name"],
+                        path=file_meta["path"],
+                        extension=file_meta["extension"])
     if not logfile:
         return
 
@@ -266,16 +288,20 @@ def main(effective_config):
     if not log_lines:
         return
 
-    parsed_data = parse_logs(log_lines, float(effective_config["MAX_ERROR_PERC"]))
+    parsed_data = parse_logs(log_lines,
+                             float(effective_config["MAX_ERROR_PERC"]))
     if not parsed_data:
         return
 
-    data_for_table = collect_data_for_table(parsed_data, effective_config["REPORT_SIZE"])
+    data_for_table = collect_data_for_table(parsed_data,
+                                            effective_config["REPORT_SIZE"])
     report_content = render_html(data_for_table)
     if not report_content:
         return
 
-    save_to_file(report_content, get_file_name_from_meta(file_meta), effective_config["REPORT_DIR"])
+    save_to_file(report_content,
+                 get_file_name_from_meta(file_meta),
+                 effective_config["REPORT_DIR"])
 
 
 if __name__ == "__main__":
@@ -289,4 +315,3 @@ if __name__ == "__main__":
         logging.exception("Unexpected error")
     except KeyboardInterrupt:
         logging.exception("Interrupted by user")
-
